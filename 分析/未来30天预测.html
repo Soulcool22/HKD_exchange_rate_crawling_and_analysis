@@ -1,0 +1,62 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>2025-11-03 至 2025-12-03 趋势预测（汇卖价，LSTM·多特征·直接多步）</title>
+  <style>body { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif; } #container { max-width: 1200px; margin: 20px auto; }</style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
+</head>
+<body>
+  <div id="container">
+    <h3>2025-11-03 至 2025-12-03 趋势预测（汇卖价，LSTM·多特征·直接多步）</h3>
+    <canvas id="chart" height="120"></canvas>
+    <p>图例：<span style="color:#1f77b4">实际(近15天)</span>，<span style="color:#ff7f0e">预测(虚线)</span></p>
+  </div>
+  <script>
+    const actualLabels = ['2025-10-20', '2025-10-21', '2025-10-22', '2025-10-23', '2025-10-24', '2025-10-25', '2025-10-26', '2025-10-27', '2025-10-28', '2025-10-29', '2025-10-30', '2025-10-31', '2025-11-01', '2025-11-02', '2025-11-03'];
+    const actualData = [91.84, 91.83, 91.91, 91.86, 91.89, 91.9, 91.9, 91.74, 91.58, 91.55, 91.78, 91.79, 91.85, 91.85, 91.8];
+    const forecastLabels = ['2025-11-04', '2025-11-05', '2025-11-06', '2025-11-07', '2025-11-08', '2025-11-09', '2025-11-10', '2025-11-11', '2025-11-12', '2025-11-13', '2025-11-14', '2025-11-15', '2025-11-16', '2025-11-17', '2025-11-18', '2025-11-19', '2025-11-20', '2025-11-21', '2025-11-22', '2025-11-23', '2025-11-24', '2025-11-25', '2025-11-26', '2025-11-27', '2025-11-28', '2025-11-29', '2025-11-30', '2025-12-01', '2025-12-02', '2025-12-03'];
+    const forecastData = [91.84908294677734, 91.88285827636719, 91.87952423095703, 91.89209747314453, 91.90990447998047, 91.93101501464844, 91.88320922851562, 91.84602355957031, 91.99468994140625, 91.77472686767578, 91.80736541748047, 91.89154052734375, 91.90170288085938, 91.93570709228516, 91.89962768554688, 91.90919494628906, 91.98661804199219, 91.88087463378906, 91.86392974853516, 91.84223937988281, 91.8811264038086, 91.96027374267578, 91.89739227294922, 91.86359405517578, 91.83618927001953, 91.83541107177734, 91.89856719970703, 91.9715576171875, 91.93341064453125, 91.90143585205078];
+    const ctx = document.getElementById('chart').getContext('2d');
+    const allLabels = actualLabels.concat(forecastLabels);
+    const minVal = Math.min(...actualData, ...forecastData);
+    const maxVal = Math.max(...actualData, ...forecastData);
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: allLabels,
+        datasets: [
+          { label: '实际(近15天)', data: actualData, borderColor: '#1f77b4', backgroundColor: 'rgba(31,119,180,0.1)', tension: 0.2, fill: false },
+          { label: '预测(30天)', data: Array(actualData.length).fill(null).concat(forecastData), borderColor: '#ff7f0e', backgroundColor: 'rgba(255,127,14,0.1)', borderDash: [6,4], tension: 0.2, fill: false }
+        ]
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          zoom: { pan: { enabled: true, mode: 'xy' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'xy' } },
+          legend: { position: 'top' },
+          tooltip: {
+            enabled: true,
+            callbacks: {
+              title: (items) => '日期：' + (items && items.length ? items[0].label : ''),
+              label: (ctx) => {
+                const val = ctx.parsed.y;
+                const ds = ctx.dataset && ctx.dataset.label ? ctx.dataset.label : '值';
+                return ds + '：' + Number(val).toFixed(4);
+              }
+            }
+          }
+        },
+        scales: {
+          x: { type: 'time', time: { unit: 'day' } },
+          y: { suggestedMin: minVal - (maxVal - minVal) * 0.05, suggestedMax: maxVal + (maxVal - minVal) * 0.05 }
+        }
+      }
+    });
+  </script>
+</body>
+</html>
