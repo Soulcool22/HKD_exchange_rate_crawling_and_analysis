@@ -1,3 +1,17 @@
+# =========================================
+# 脚本说明：多特征输入 + 直接多步 LSTM 趋势预测
+# -----------------------------------------
+# 目的：读取汇率时间序列，构造周期/统计特征，训练 LSTM
+# 模型直接输出未来 30 天预测，并生成静态 PNG、交互 HTML、
+# 预测报告 TXT 与复现命令。
+# 方法要点：
+# - 多特征：周内/月底 sin/cos，1 日差分、7 日均值偏差、
+#   7 日标准差、周末指示，帮助模型理解节律与波动；
+# - 直接多步：一次训练直接输出多步（Seq2Seq 风格），减少
+#   递归误差累积并学习跨步相关性；
+# - 缩放：目标序列使用 min-max，部分特征使用列级 z-score；
+# 输出：分析/未来30天预测.png / .html / .csv 与 预测报告.txt
+# =========================================
 import argparse
 import os
 from datetime import datetime, timedelta
@@ -14,6 +28,9 @@ from tensorflow.keras.layers import LSTM, Dense
 from tensorflow.keras.callbacks import EarlyStopping
 
 
+# 功能说明：安全读取 CSV（尝试多编码）
+# 目的：兼容不同来源文件的编码（utf-8-sig/utf-8/gbk），避免因编码问题导致读取失败。
+# 行为：依次尝试编码，成功立即返回；若全部失败，抛出最后一次异常以便定位问题。
 def _read_csv_safely(path: str) -> pd.DataFrame:
     encodings = ["utf-8-sig", "utf-8", "gbk"]
     last_err = None
@@ -26,6 +43,9 @@ def _read_csv_safely(path: str) -> pd.DataFrame:
     raise last_err
 
 
+# 功能说明：设置中文字体环境
+# 目的：确保 matplotlib 绘图能正常显示中文与负号。
+# 策略：尝试常见中文字体，成功则生效；失败继续尝试下一个候选。
 def _ensure_chinese_font():
     for font_name in ["Microsoft YaHei", "SimHei", "Arial Unicode MS"]:
         try:
@@ -36,6 +56,9 @@ def _ensure_chinese_font():
             continue
 
 
+# 功能说明：从 CSV 读取并清洗目标序列
+# 目的：统一日期解析与排序，去除无效记录，得到以日期为索引的浮点序列。
+# 细节：支持“YYYY年MM月DD日”与常规日期格式，目标列转为数值并去除 NaN，重复日期取最后一条。
 def load_series(csv_path: str, rate_col: str) -> pd.Series:
     df = _read_csv_safely(csv_path)
     df.columns = [c.strip() for c in df.columns]
@@ -73,12 +96,18 @@ def load_series(csv_path: str, rate_col: str) -> pd.Series:
     return s
 
 
+# 功能说明：补齐为按日连续时间序列
+# 目的：确保时间步等间隔，便于序列建模与窗口切片。
+# 行为：在完整日期索引上重建序列并前向填充缺失值。
 def as_daily_continuous(s: pd.Series) -> pd.Series:
     full_index = pd.date_range(s.index.min(), s.index.max(), freq="D")
     s_daily = s.reindex(full_index).ffill()
     return s_daily
 
 
+# 功能说明：构建多特征矩阵
+# 目的：为 LSTM 提供丰富上下文：周期特征、统计动量、周末指示。
+# 输出：与原序列对齐的 DataFrame，首列为目标 y，其余为特征列。
 def build_features(s: pd.Series) -> pd.DataFrame:
     """
     构造多特征：周期(周内/月底) sin/cos，统计(1日差分、7日均值偏差、7日标准差)，周末指示。
@@ -112,6 +141,9 @@ def build_features(s: pd.Series) -> pd.DataFrame:
     return df
 
 
+# 功能说明：特征缩放（列级 z-score）
+# 目的：提升训练稳定性与收敛速度，保持周期/周末指示原始尺度以保留语义。
+# 说明：只对 delta1/ma7_diff/std7 做标准化，其余直接保留。
 def scale_features(df: pd.DataFrame) -> np.ndarray:
     """对数值特征做列级标准化（z-score）；周期 sin/cos 与周末指示无需缩放。"""
     X = df.copy()
@@ -124,6 +156,9 @@ def scale_features(df: pd.DataFrame) -> np.ndarray:
     return X.astype(np.float32).values
 
 
+# 功能说明：目标序列缩放（min-max）
+# 目的：将 y 映射到 [0,1] 区间，利于网络输出与损失稳定。
+# 返回：缩放后数组、最小值、最大值用于反缩放。
 def scale_series(s: pd.Series):
     v = s.values.astype(np.float32)
     vmin, vmax = float(np.min(v)), float(np.max(v))
@@ -134,10 +169,15 @@ def scale_series(s: pd.Series):
     return scaled, vmin, vmax
 
 
+# 功能说明：反缩放
+# 目的：将网络输出从缩放空间恢复到原始数值空间。
 def inverse_scale(arr, vmin, vmax):
     return arr * (vmax - vmin) + vmin
 
 
+# 功能说明：生成监督学习样本（直接多步）
+# 目的：得到形状 X:(n, lookback, n_features)，y:(n, horizon) 的训练数据。
+# 原理：滑动窗口切片，输入为过去 lookback 天特征，标签为未来 horizon 天目标。
 def make_supervised_multistep(features: np.ndarray, target_scaled: np.ndarray, lookback: int = 30, horizon: int = 30):
     """生成多步监督样本：X (n_samples, lookback, n_features)，y (n_samples, horizon)"""
     X_list, y_list = [], []
@@ -153,6 +193,9 @@ def make_supervised_multistep(features: np.ndarray, target_scaled: np.ndarray, l
     return X, y
 
 
+# 功能说明：构建 LSTM 模型（直接多步输出）
+# 结构：LSTM(64, return_sequences=True) -> LSTM(32) -> Dense(horizon)
+# 说明：第一层输出序列以捕捉时间步间关系，第二层聚合为固定长度表示，最后密集层一次输出所有未来步。
 def build_model(n_features: int, lookback: int = 30, horizon: int = 30):
     model = Sequential([
         LSTM(64, return_sequences=True, activation='tanh', input_shape=(lookback, n_features)),
@@ -163,6 +206,9 @@ def build_model(n_features: int, lookback: int = 30, horizon: int = 30):
     return model
 
 
+# 功能说明：基础趋势统计
+# 目的：对一个时间序列计算起终点、净变动、极值及波动性、
+# 连续上涨/下跌的最长长度等，用于报告与文字分析。
 def _series_stats(s: pd.Series):
     start = float(s.iloc[0])
     end = float(s.iloc[-1])
@@ -200,6 +246,8 @@ def _series_stats(s: pd.Series):
     }
 
 
+# 功能说明：生成趋势文字描述
+# 目的：将统计数据转为中文自然语言段落，便于报告阅读。
 def _build_trend_text(name: str, s: pd.Series) -> str:
     st = _series_stats(s)
     return (
@@ -211,6 +259,9 @@ def _build_trend_text(name: str, s: pd.Series) -> str:
     )
 
 
+# 功能说明：评估（走前评估，单次训练直接多步）
+# 目的：在最近窗口进行预测，计算 RMSE/MAE/MAPE 等指标，衡量模型近期拟合质量。
+# 策略：一次训练后用最后一个输入窗口预测未来 horizon，这里只取最近 eval_days 与真实值比较。
 def evaluate_walk_forward(model_builder, features_scaled: np.ndarray, target_scaled: np.ndarray, lookback: int = 30, eval_days: int = 30, horizon: int = 30):
     """一次训练后对最近窗口进行直接多步预测评估。"""
     eval_days = min(eval_days, horizon, len(target_scaled) - lookback - 5)
@@ -233,6 +284,9 @@ def evaluate_walk_forward(model_builder, features_scaled: np.ndarray, target_sca
     return {"rmse": rmse, "mae": mae, "mape": mape, "window_days": int(eval_days)}
 
 
+# 功能说明：未来预测（直接多步）
+# 目的：在缩放空间一次性输出 steps 个未来值，用于生成预测序列。
+# 训练：使用全部样本滑动窗口作为训练对，早停策略控制过拟合。
 def forecast_future(model_builder, features_scaled: np.ndarray, target_scaled: np.ndarray, lookback: int = 30, steps: int = 30):
     """直接多步：一次训练，单次前向输出 steps 个未来值（在缩放空间）。"""
     X_train, y_train = make_supervised_multistep(features_scaled, target_scaled, lookback, steps)
@@ -245,6 +299,9 @@ def forecast_future(model_builder, features_scaled: np.ndarray, target_scaled: n
     return yhat.astype(np.float32)
 
 
+# 功能说明：绘制静态 PNG 趋势图
+# 目的：呈现近 15 天实际与未来 30 天预测；用虚线连接边界以便视觉连续。
+# 细节：自动设置 y 轴边距，启用网格与图例，保存到指定路径。
 def plot_png(last15: pd.Series, forecast: pd.Series, out_png: str, title: str):
     _ensure_chinese_font()
     plt.figure(figsize=(12, 3.6))
@@ -268,6 +325,9 @@ def plot_png(last15: pd.Series, forecast: pd.Series, out_png: str, title: str):
     plt.close()
 
 
+# 功能说明：生成交互式 HTML 趋势图
+# 目的：在浏览器中可缩放/平移并悬浮查看具体数值，提升可读性与分析体验。
+# 技术：Chart.js + time 适配器 + zoom 插件；将实际与预测拼接到统一时间轴。
 def write_html_chart(last15: pd.Series, forecast: pd.Series, out_html: str, title: str):
     dates_actual = [d.strftime("%Y-%m-%d") for d in last15.index]
     vals_actual = [float(v) for v in last15.values]
@@ -340,6 +400,8 @@ def write_html_chart(last15: pd.Series, forecast: pd.Series, out_html: str, titl
         f.write(html)
 
 
+# 功能说明：写出简版评估报告
+# 目的：输出基本参数、评估指标与预测区间统计，用于快速浏览。
 def write_report(path: str, info: dict):
     lines = [
         "LSTM模型性能评估报告",
@@ -364,6 +426,9 @@ def write_report(path: str, info: dict):
         f.write("\n".join(lines))
 
 
+# 功能说明：写出完整版预测与方法说明报告
+# 目的：详细记录方法、参数、评估、区间统计、趋势文字及复现命令，便于理解与复查。
+# 注意：使用 utf-8-sig 以兼容 Windows 记事本的 BOM 行为。
 def write_report_v2(path: str, info: dict):
     lines = []
     lines += [
@@ -417,6 +482,14 @@ def write_report_v2(path: str, info: dict):
         f.write("\n".join(lines))
 
 
+# 功能说明：主流程入口
+# 目的：解析参数、读取数据、构建特征、训练评估、生成预测、输出图表与报告。
+# 步骤：
+# 1) 读取并截断到当前日期；
+# 2) 构建特征与缩放目标；
+# 3) 评估与预测（直接多步）；
+# 4) 生成近 15 天实际与 30 天预测的图表与报告；
+# 5) 写出预测 CSV 并打印产物路径。
 def main():
     parser = argparse.ArgumentParser(description="HKD 30天趋势预测 (LSTM)")
     parser.add_argument("--input", default="hkd_rates_30pages.csv")
@@ -491,5 +564,6 @@ def main():
     print(f"未来30天预测CSV: {out_csv}")
 
 
+# 脚本入口：允许从命令行直接运行
 if __name__ == "__main__":
     main()
