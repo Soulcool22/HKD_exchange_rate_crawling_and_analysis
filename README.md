@@ -23,6 +23,69 @@ python -m hkd_fx.cli run-all
 
 ---
 
+## 工作区文件框架（完整）
+
+```text
+HKD_exchange_rate_crawling_and_analysis/
+├─ README.md
+├─ requirements.txt
+├─ pyproject.toml
+├─ commands.txt
+├─ .gitignore
+├─ config/
+│  └─ default.yaml
+├─ src/
+│  └─ hkd_fx/
+│     ├─ cli.py                       # 命令行入口（run-all / ingest / forecast / backtest）
+│     ├─ app.py                       # 全链路编排与 latest/分析 镜像
+│     ├─ contracts.py                 # 核心数据契约
+│     ├─ config.py                    # 配置加载
+│     ├─ utils.py
+│     ├─ ingestion/
+│     │  ├─ cmb_client.py             # Playwright 抓取客户端
+│     │  ├─ parser.py                 # 表格解析
+│     │  └─ incremental_sync.py       # 增量抓取并入主仓
+│     ├─ dataset/
+│     │  ├─ canonical_store.py        # 主数据仓读写与去重
+│     │  ├─ registry.py               # 预测/回测注册表
+│     │  └─ snapshot_store.py         # 抓取快照保存
+│     ├─ forecast/
+│     │  ├─ features.py               # 特征工程与缩放
+│     │  ├─ lstm_model.py             # LSTM 训练/评估/预测
+│     │  ├─ render_forecast.py        # 预测图表渲染
+│     │  └─ pipeline.py               # 预测流水线
+│     ├─ backtest/
+│     │  ├─ evaluator.py              # 指标计算与对齐
+│     │  ├─ compare_renderer.py       # 对比图与报告渲染
+│     │  └─ orchestrator.py           # 历史批次回测调度
+│     └─ reporting/
+│        └─ forecast_report.py        # 预测报告生成
+├─ scripts/
+│  ├─ run_all.py                      # 便捷脚本入口
+│  ├─ migrate_legacy_data.py          # 迁移旧数据到主仓
+│  └─ rebuild_backtests.py            # 重建全部回测结果
+├─ tests/
+│  ├─ test_canonical_store.py
+│  └─ test_evaluator.py
+├─ 分析/
+│  ├─ fit_forecast_lstm.py            # 旧入口兼容包装
+│  ├─ compare_forecast_actual.py      # 旧入口兼容包装
+│  ├─ trend_plot.py
+│  └─ 未来30天预测.* / 预测对比*.*      # 最新镜像输出
+├─ scrape_cmb_rates_playwright.py     # 旧入口兼容包装
+├─ data/                              # 运行时生成（已在 .gitignore）
+│  ├─ master/hkd_rates_master.csv
+│  ├─ registry/forecast_runs.csv
+│  ├─ registry/comparison_status.csv
+│  └─ snapshots/crawl/*.csv
+└─ artifacts/                         # 运行时生成（已在 .gitignore）
+   ├─ forecasts/<forecast_run_id>/
+   ├─ comparisons/<forecast_run_id>/
+   └─ latest/
+```
+
+---
+
 ## 新目录结构（核心）
 
 ```text
@@ -132,4 +195,3 @@ python scripts/migrate_legacy_data.py
 ```bash
 python -m hkd_fx.cli run-all --config config/default.yaml
 ```
-
