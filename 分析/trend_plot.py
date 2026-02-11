@@ -1,7 +1,35 @@
 import argparse
 from pathlib import Path
-import pandas as pd
+import sys
+
 import matplotlib.pyplot as plt
+import pandas as pd
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+
+def _read_master_series(rate_col: str):
+    try:
+        from hkd_fx.config import load_config, resolve_path
+        from hkd_fx.dataset.canonical_store import load_master_rates
+    except Exception:
+        return None
+
+    config = load_config()
+    root = resolve_path(".")
+    master = load_master_rates(config, root)
+    if master.empty or rate_col not in master.columns:
+        return None
+    master = master[master["currency"] == config.currency].copy()
+    master["date"] = pd.to_datetime(master["date"], errors="coerce")
+    master = master.dropna(subset=["date"])
+    master[rate_col] = pd.to_numeric(master[rate_col], errors="coerce")
+    master = master.dropna(subset=[rate_col]).sort_values("date")
+    return master.set_index("date")[rate_col]
 
 
 def ensure_outdir(outdir: Path):
@@ -71,7 +99,15 @@ def main():
     outdir = Path(args.outdir)
     ensure_outdir(outdir)
 
-    series = load_series(input_path, args.start, args.end, rate_col=args.rate_col)
+    master_series = _read_master_series(args.rate_col)
+    if master_series is not None:
+        mask = (master_series.index >= pd.to_datetime(args.start)) & (master_series.index <= pd.to_datetime(args.end))
+        series = master_series.loc[mask]
+        full_index = pd.date_range(series.index.min(), series.index.max(), freq="D")
+        series = series.reindex(full_index).ffill()
+    else:
+        series = load_series(input_path, args.start, args.end, rate_col=args.rate_col)
+
     title = f"{args.start} 至 {args.end} 趋势（{args.rate_col}）"
     plot_trend(series, outdir, title=title)
 

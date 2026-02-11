@@ -1,0 +1,25 @@
+pipeline:
+  currency: 港币
+  rate_col: 汇卖价
+  crawl_pages: 5
+  lookback: 30
+  horizon: 30
+  history_window_days: 15
+  model_name: lstm_multifeature_direct
+  source_url: https://fx.cmbchina.com/hq/history
+
+paths:
+  data_dir: data
+  artifacts_dir: artifacts
+  analysis_mirror_dir: 分析
+  master_rates_file: master/hkd_rates_master.csv
+  forecast_registry_file: registry/forecast_runs.csv
+  comparison_registry_file: registry/comparison_status.csv
+  crawl_snapshot_dir: snapshots/crawl
+
+encoding_fallbacks:
+  - utf-8-sig
+  - utf-8
+  - gbk
+  - gb18030
+

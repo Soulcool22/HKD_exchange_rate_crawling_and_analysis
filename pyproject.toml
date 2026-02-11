@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hkd-fx"
+version = "0.1.0"
+description = "HKD exchange-rate crawling, forecasting, and backtesting pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "beautifulsoup4>=4.12.2",
+  "lxml>=5.2.1",
+  "matplotlib>=3.8.0",
+  "numpy>=1.24.0",
+  "pandas>=2.0.0",
+  "playwright>=1.47.0",
+  "PyYAML>=6.0.1",
+  "tensorflow>=2.12.0",
+]
+
+[project.scripts]
+hkd-fx = "hkd_fx.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

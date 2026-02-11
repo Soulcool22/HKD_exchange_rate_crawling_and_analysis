@@ -1,39 +1,30 @@
-# 安装依赖（首次运行需执行一次）
+# 安装依赖（首次执行）
 python -m pip install -r requirements.txt
 python -m playwright install chromium
 
-# 运行示例：抓取港币前 30 页
-python scrape_cmb_rates_playwright.py --nbr 港币 --max_pages 30 --output hkd_rates_30pages.csv
+# 推荐：单命令执行全链路（抓取→预测→历史回测→镜像）
+python -m hkd_fx.cli run-all
 
-# 运行模板：按需替换币种与页数
-# 指定币种与页数，输出到自定义文件名
-python scrape_cmb_rates_playwright.py --nbr 美元 --max_pages 20 --output usd_rates_20pages.csv
-python scrape_cmb_rates_playwright.py --nbr 欧元 --max_pages 10 --output eur_rates_10pages.csv
+# 可选：覆盖参数
+python -m hkd_fx.cli run-all --currency 港币 --rate-col 汇卖价 --pages 5 --lookback 30 --horizon 30
 
-# 抓取所有页（不限制页数），省略 --max_pages
-python scrape_cmb_rates_playwright.py --nbr 港币 --output hkd_rates_all.csv
+# 仅抓取增量
+python -m hkd_fx.cli ingest --currency 港币 --pages 5
 
-############################################
-# 预测与可视化（LSTM·多特征·直接多步）
-############################################
+# 仅预测
+python -m hkd_fx.cli forecast --rate-col 汇卖价 --lookback 30 --horizon 30
 
-# 使用全量数据进行预测（如已抓取 hkd_rates_30pages.csv）
-python 分析/fit_forecast_lstm.py --input hkd_rates_30pages.csv --rate_col "汇卖价" --lookback 90
+# 回测全部历史预测批次
+python -m hkd_fx.cli backtest
 
-# 固定当前分析日期（可选），例如冻结到 2025-11-03
-python 分析/fit_forecast_lstm.py --input hkd_rates_30pages.csv --rate_col "汇卖价" --lookback 90 --current_date 2025-11-03
+# 兼容旧入口（仍可用，内部转发）
+python scrape_cmb_rates_playwright.py --nbr 港币 --max_pages 5
+python 分析/fit_forecast_lstm.py --rate_col "汇卖价" --lookback 30
+python 分析/compare_forecast_actual.py
 
-# 启动本地预览服务器并在浏览器查看结果
-python -m http.server 8000
-# 如端口 8000 被占用，可改用：python -m http.server 8080（随后将下方链接端口改为 8080）
-# 启动服务器后在浏览器打开：
-# 交互图  http://localhost:8000/分析/未来30天预测.html
-# 静态图  http://localhost:8000/分析/未来30天预测.png
-# 报告TXT http://localhost:8000/分析/预测报告.txt
+# 迁移历史数据到新主仓（首次重构后可执行一次）
+python scripts/migrate_legacy_data.py
 
-############################################
-# 仅生成历史趋势图（不训练模型）
-############################################
+# 重建全部回测
+python scripts/rebuild_backtests.py
 
-# 按自定义时间范围生成趋势图（列名示例：汇卖价）
-python 分析/trend_plot.py --input hkd_rates_30pages.csv --start 2022-11-03 --end 2025-11-03 --rate_col "汇卖价"
